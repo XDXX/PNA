@@ -41,12 +41,12 @@ fn cli_set() {
         .stderr(contains("unimplemented"));
 }
 
-// `kvs rm <KEY>` should print "unimplemented" to stderr and exit with non-zero code
+// `kvs remove <KEY>` should print "unimplemented" to stderr and exit with non-zero code
 #[test]
 fn cli_rm() {
     Command::cargo_bin("kvs")
         .unwrap()
-        .args(&["rm", "key1"])
+        .args(&["remove", "key1"])
         .assert()
         .failure()
         .stderr(contains("unimplemented"));
@@ -92,13 +92,13 @@ fn cli_invalid_set() {
 fn cli_invalid_rm() {
     Command::cargo_bin("kvs")
         .unwrap()
-        .args(&["rm"])
+        .args(&["remove"])
         .assert()
         .failure();
 
     Command::cargo_bin("kvs")
         .unwrap()
-        .args(&["rm", "extra", "field"])
+        .args(&["remove", "extra", "field"])
         .assert()
         .failure();
 }
@@ -152,4 +152,26 @@ fn remove_key() {
     store.set("key1".to_owned(), "value1".to_owned()).unwrap();
     store.remove("key1".to_owned());
     assert_eq!(store.get("key1".to_owned()), None);
+}
+
+// Should get Err when insert a record with key more than 256B
+#[test]
+#[should_panic]
+fn insert_big_key() {
+    let mut store = KvStore::new();
+    let big_key: Vec<u8> = vec![0; 257];
+    let big_key = String::from_utf8(big_key).unwrap();
+
+    store.set(big_key, "value".to_owned()).unwrap();
+}
+
+// Should get Err when insert a record with value more than 4KB
+#[test]
+#[should_panic]
+fn insert_big_value() {
+    let mut store = KvStore::new();
+    let big_value: Vec<u8> = vec![0; 1 << 12 + 1];
+    let big_value = String::from_utf8(big_value).unwrap();
+
+    store.set("key".to_owned(), big_value).unwrap();
 }
