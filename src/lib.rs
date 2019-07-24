@@ -1,7 +1,10 @@
 //! A Simple Key-Value DataBase in memory.
 
-//#![deny(missing_docs)]
+#![deny(missing_docs)]
 use std::collections::HashMap;
+use error::SizeError;
+
+mod error;
 
 /// The struct of Key-Value DataBase implemented with
 /// [HashMap](https://doc.rust-lang.org/std/collections/hash_map/struct.HashMap.html).
@@ -45,7 +48,7 @@ impl KvStore {
     ///
     /// db.set(big_key, "value".to_owned()).expect_err("expect err there"); // set returns an error
     /// ```
-    pub fn set(&mut self, key: String, value: String) -> Result<(), String> {
+    pub fn set(&mut self, key: String, value: String) -> error::Result {
         check_length(&key, "key", 256)?;
         check_length(&value, "value", 1 << 12)?;
 
@@ -105,13 +108,14 @@ impl KvStore {
     }
 }
 
-fn check_length(s: &str, s_type: &str, max_len_in_bytes: usize) -> Result<(), String> {
+fn check_length(s: &str, s_type: &str, max_len_in_bytes: usize) -> error::Result {
     if s.len() <= max_len_in_bytes {
         Ok(())
     } else {
-        Err(format!(
-            "The {} must be less than {} bytes.",
-            s_type, max_len_in_bytes
-        ))
+        match s_type {
+            "key" => Err(SizeError::InvalidKeySize),
+            "value" => Err(SizeError::InvalidValueSize),
+            _ => panic!("Unsupport type!")
+        }
     }
 }
