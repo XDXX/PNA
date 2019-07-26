@@ -5,6 +5,8 @@ authors = ["Zhixiang Hao <haozx@buaa.edu.cn>"]
 description = "A key-value store"
 edition = "2018"
 
+license = "MIT"
+
 [dependencies]
 structopt = "0.2"
 
