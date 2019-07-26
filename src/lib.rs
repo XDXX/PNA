@@ -115,8 +115,7 @@ impl KvStore {
     /// ```
     pub fn scan(&self) -> impl Iterator<Item = &String> {
         self.table.keys()
-    }
-}
+
 
 fn check_length(s: &str, s_type: &str, max_len_in_bytes: usize) -> Result<()> {
     if s.len() <= max_len_in_bytes {
