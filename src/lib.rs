@@ -2,9 +2,10 @@
 
 #![deny(missing_docs)]
 use std::collections::HashMap;
-use error::SizeError;
+use error::{KvsError, Result};
 
 mod error;
+
 
 /// The struct of Key-Value DataBase implemented with
 /// [HashMap](https://doc.rust-lang.org/std/collections/hash_map/struct.HashMap.html).
@@ -36,6 +37,7 @@ impl KvStore {
     ///
     /// # Errors
     /// If the size of key or value exceeds the limitation, then an error is returned.
+    ///
     /// # Examples
     ///
     /// ```
@@ -48,7 +50,7 @@ impl KvStore {
     ///
     /// db.set(big_key, "value".to_owned()).expect_err("expect err there"); // set returns an error
     /// ```
-    pub fn set(&mut self, key: String, value: String) -> error::Result {
+    pub fn set(&mut self, key: String, value: String) -> Result<()> {
         check_length(&key, "key", 256)?;
         check_length(&value, "value", 1 << 12)?;
 
@@ -58,6 +60,9 @@ impl KvStore {
 
     /// Returns the value associated with the key.
     ///
+    /// # Errors
+    /// Return an error if the value is not read successfully.
+    ///
     /// # Examples
     ///
     /// ```
@@ -65,15 +70,17 @@ impl KvStore {
     ///
     /// let mut db = KvStore::new();
     /// db.set("key1".to_owned(), "value1".to_owned()).unwrap();
-    /// assert_eq!(db.get("key1".to_owned()), Some("value1".to_owned()));
-    /// assert_eq!(db.get("key2".to_owned()), None);
+    /// assert_eq!(db.get("key1".to_owned()).unwrap(), Some("value1".to_owned()));
+    /// assert_eq!(db.get("key2".to_owned()).unwrap(), None);
     /// ```
-    pub fn get(&self, key: String) -> Option<String> {
-        self.table.get(&key).cloned()
+    pub fn get(&self, key: String) -> Result<Option<String>> {
+        Ok(self.table.get(&key).cloned())
     }
 
-    /// Removes the key and associated value from the DataBase. If the key does't exists,
-    /// nothing will happen.
+    /// Removes the key and associated value from the DataBase.
+    ///
+    /// # Errors
+    /// Return an error if the key does not exist or is not removed successfully.
     /// 
     /// # Examples
     /// ```
@@ -81,12 +88,15 @@ impl KvStore {
     ///
     /// let mut db = KvStore::new();
     /// db.set("key1".to_owned(), "value1".to_owned()).unwrap();
-    /// db.remove("key1".to_owned()); // Removes "key1" from the DataBase
+    /// db.remove("key1".to_owned()).expect("Expect Ok(()) here"); // Removes "key1" from the DataBase
     ///
-    /// db.remove("key2".to_owned()); // "key2" doesn't in DataBase, so nothing will happen.
+    /// db.remove("key2".to_owned()).expect_err("Expect KeyNotFound Err."); // "key2" doesn't in DataBase.
     /// ```
-    pub fn remove(&mut self, key: String) {
-        self.table.remove(&key);
+    pub fn remove(&mut self, key: String) -> Result<()> {
+        match self.table.remove(&key) {
+            Some(_) => Ok(()),
+            None => Err(KvsError::KeyNotFound)
+        }
     }
 
     /// Returns an iterator of all the keys in the DataBase. If the DataBase is empty, returns an
@@ -108,13 +118,13 @@ impl KvStore {
     }
 }
 
-fn check_length(s: &str, s_type: &str, max_len_in_bytes: usize) -> error::Result {
+fn check_length(s: &str, s_type: &str, max_len_in_bytes: usize) -> Result<()> {
     if s.len() <= max_len_in_bytes {
         Ok(())
     } else {
         match s_type {
-            "key" => Err(SizeError::InvalidKeySize),
-            "value" => Err(SizeError::InvalidValueSize),
+            "key" => Err(KvsError::InvalidKeySize),
+            "value" => Err(KvsError::InvalidValueSize),
             _ => panic!("Unsupport type!")
         }
     }
