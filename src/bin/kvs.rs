@@ -1,5 +1,8 @@
 use std::process::exit;
 use structopt::StructOpt;
+use std::env::current_dir;
+
+use kvs::KvStore;
 
 #[derive(StructOpt, Debug)]
 #[structopt(
@@ -26,40 +29,44 @@ enum Opt {
         name = "get",
         raw(setting = "structopt::clap::AppSettings::DisableHelpFlags")
     )]
-    Get{ key: String },
+    Get { key: String },
 
     ///Remove and return the associated value of <key>. If <key> does't exist, return None.
     #[structopt(
-        name = "remove",
+        name = "rm",
         raw(setting = "structopt::clap::AppSettings::DisableHelpFlags")
     )]
-    Remove{ key: String },
+    Remove { key: String },
 
     ///Scan all keys in the dataset.
     #[structopt(
         name = "scan",
         raw(setting = "structopt::clap::AppSettings::DisableHelpFlags")
     )]
-    Scan
-
+    Scan,
 }
 
 fn main() {
     let opt = Kvs::from_args();
+    let mut db = KvStore::open(current_dir().unwrap()).unwrap_or_else(|e| e.exit(1));
 
     match opt.option {
-        Opt::Set{..} => {
-            eprintln!("unimplemented");
-            exit(1);
+        Opt::Set { key, value } => {
+            db.set(key, value).unwrap_or_else(|e| e.exit(1));
+        }
+        Opt::Get { key } => match db.get(key) {
+            Ok(value_opt) => {
+                if let Some(value) = value_opt {
+                    println!("{}", value);
+                } else {
+                    println!("Key not found");
+                }
+            }
+            Err(e) => e.exit(1),
         },
-        Opt::Get{..} => {
-            eprintln!("unimplemented");
-            exit(1);
-        },
-        Opt::Remove{..} => {
-            eprintln!("unimplemented");
-            exit(1);
-        },
+        Opt::Remove { key } => {
+            db.remove(key).unwrap_or_else(|e| e.exit(1));
+        }
         Opt::Scan => {
             eprintln!("unimplemented");
             exit(1);

@@ -1,27 +1,51 @@
 use std::fmt;
+use std::io;
+use std::process::exit;
 use std::result;
 
+use serde_json;
+
+/// Custom Result type for kvs.
 pub type Result<T> = result::Result<T, KvsError>;
 
 #[derive(Debug)]
 pub enum KvsError {
     InvalidKeySize,
     InvalidValueSize,
-    KeyNotFound
+    KeyNotFound,
+    IOError(io::Error),
+    DeserError(serde_json::error::Error),
+}
+
+impl KvsError {
+    pub fn exit(&self, err: i32) -> ! {
+        println!("{}", self);
+        exit(err);
+    }
 }
 
 impl fmt::Display for KvsError {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> fmt::Result {
         match self {
-            KvsError::InvalidKeySize => {
-                write!(f, "The key cannot be larger than 256B.")
-            },
-            KvsError::InvalidValueSize => {
-                write!(f, "The value cannot be larger than 4KB.")
-            },
-            KvsError::KeyNotFound => {
-                write!(f, "The key not found in database.")
-            }
+            KvsError::InvalidKeySize => write!(f, "The key cannot be larger than 256B."),
+            KvsError::InvalidValueSize => write!(f, "The value cannot be larger than 4KB."),
+            KvsError::KeyNotFound => write!(f, "Key not found"),
+            KvsError::IOError(inner) => write!(f, "{}", inner),
+            KvsError::DeserError(inner) => write!(f, "{}", inner),
         }
     }
 }
+
+impl From<io::Error> for KvsError {
+    fn from(error: io::Error) -> Self {
+        KvsError::IOError(error)
+    }
+}
+
+impl From<serde_json::error::Error> for KvsError {
+    fn from(error: serde_json::error::Error) -> Self {
+        KvsError::DeserError(error)
+    }
+}
+
+impl std::error::Error for KvsError {}

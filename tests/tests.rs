@@ -33,6 +33,7 @@ fn cli_get_non_existent_key() {
         .assert()
         .success()
         .stdout(eq("Key not found").trim());
+    println!("{:?}", temp_dir);
 }
 
 // `kvs rm <KEY>` should print "Key not found" for an empty database and exit with non-zero code.
@@ -302,22 +303,24 @@ fn compaction() -> Result<()> {
 
 // Should get Err when insert a record with key more than 256B
 #[test]
-#[should_panic]
-fn insert_big_key() {
-    let mut store = KvStore::new();
+fn insert_big_key() -> Result<()> {
+    let temp_dir = TempDir::new().expect("unable to create temporary working directory");
+    let mut store = KvStore::open(temp_dir.path())?;
     let big_key: Vec<u8> = vec![0; 257];
     let big_key = String::from_utf8(big_key).unwrap();
 
-    store.set(big_key, "value".to_owned()).unwrap();
+    assert!(store.set(big_key, "value".to_owned()).is_err());
+    Ok(())
 }
 
 // Should get Err when insert a record with value more than 4KB
 #[test]
-#[should_panic]
-fn insert_big_value() {
-    let mut store = KvStore::new();
+fn insert_big_value() -> Result<()> {
+    let temp_dir = TempDir::new().expect("unable to create temporary working directory");
+    let mut store = KvStore::open(temp_dir.path())?;
     let big_value: Vec<u8> = vec![0; 1 << 12 + 1];
     let big_value = String::from_utf8(big_value).unwrap();
 
-    store.set("key1".to_owned(), big_value).unwrap();
+    assert!(store.set("key1".to_owned(), big_value).is_err());
+    Ok(())
 }
