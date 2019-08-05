@@ -15,7 +15,7 @@ use serde_json::Deserializer;
 
 mod error;
 
-const REDUNDANCE_THRESHOLD: u64 = 1 << 20; // threshold that tigger log compacting.
+const REDUNDANCE_THRESHOLD: u64 = 1 << 20; // threshold that tigger log compacting, default 1MB.
 
 /// The struct of Key-Value DataBase implemented with
 /// [HashMap](https://doc.rust-lang.org/std/collections/hash_map/struct.HashMap.html).
@@ -39,18 +39,21 @@ impl KvStore {
     /// # Errors
     /// If the size of key or value exceeds the limitation, then an error is returned.
     ///
-    ///// # Examples
-    /////
-    ///// ```
-    ///// use kvs::KvStore;
-    ///// let mut db = KvStore::new();
-    ///// db.set("key1".to_owned(), "value1".to_owned()).unwrap(); // insert the record successfully.
-    /////
-    ///// let big_key: Vec<u8> = vec![0; 257];
-    ///// let big_key = String::from_utf8(big_key).unwrap(); // A key in size of 257B
-    /////
-    ///// db.set(big_key, "value".to_owned()).expect_err("expect err there"); // set returns an error
-    ///// ```
+    /// # Examples
+    ///
+    /// ```
+    /// use kvs::KvStore;
+    /// use tempfile::TempDir;
+    /// let temp_dir = TempDir::new().expect("unable to create temporary working directory");
+    /// println!("{:?}", temp_dir);
+    /// let mut db = KvStore::open(&temp_dir).unwrap();
+    /// db.set("key1".to_owned(), "value1".to_owned()).unwrap(); // insert the record successfully.
+    ///
+    /// let big_key: Vec<u8> = vec![0; 257];
+    /// let big_key = String::from_utf8(big_key).unwrap(); // A key in size of 257B
+    ///
+    /// db.set(big_key, "value".to_owned()).expect_err("expect err there"); // set returns an error
+    /// ```
     pub fn set(&mut self, key: String, value: String) -> Result<()> {
         check_length(&key, "key", 256)?;
         check_length(&value, "value", 1 << 12)?;
@@ -79,18 +82,21 @@ impl KvStore {
     /// Returns the value associated with the key.
     ///
     /// # Errors
-    /// Return an error if the value is not read successfully.
+    /// Return an error if the value in log file is not read successfully.
     ///
-    ///// # Examples
-    /////
-    ///// ```
-    ///// use kvs::KvStore;
-    /////
-    ///// let mut db = KvStore::new();
-    ///// db.set("key1".to_owned(), "value1".to_owned()).unwrap();
-    ///// assert_eq!(db.get("key1".to_owned()).unwrap(), Some("value1".to_owned()));
-    ///// assert_eq!(db.get("key2".to_owned()).unwrap(), None);
-    ///// ```
+    /// # Examples
+    ///
+    /// ```
+    /// use kvs::KvStore;
+    /// use tempfile::TempDir;
+    ///
+    /// let temp_dir = TempDir::new().expect("unable to create temporary working directory");
+    /// let mut db = KvStore::open(&temp_dir).unwrap();
+    ///
+    /// db.set("key1".to_owned(), "value1".to_owned()).unwrap();
+    /// assert_eq!(db.get("key1".to_owned()).unwrap(), Some("value1".to_owned()));
+    /// assert_eq!(db.get("key2".to_owned()).unwrap(), None);
+    /// ```
     pub fn get(&mut self, key: String) -> Result<Option<String>> {
         self.logwriter.flush()?;
 
@@ -110,20 +116,21 @@ impl KvStore {
     /// # Errors
     /// Return an error if the key does not exist or is not removed successfully.
     ///
-    ///// # Examples
-    ///// ```
-    ///// use kvs::KvStore;
-    /////
-    ///// let mut db = KvStore::new();
-    ///// db.set("key1".to_owned(), "value1".to_owned()).unwrap();
-    ///// db.remove("key1".to_owned()).expect("Expect Ok(()) here"); // Removes "key1" from the DataBase
-    /////
-    ///// db.remove("key2".to_owned()).expect_err("Expect KeyNotFound Err."); // "key2" doesn't in DataBase.
-    ///// ```
+    /// # Examples
+    /// ```
+    /// use kvs::KvStore;
+    /// use tempfile::TempDir;
+    ///
+    /// let temp_dir = TempDir::new().expect("unable to create temporary working directory");
+    /// let mut db = KvStore::open(&temp_dir).unwrap();
+    ///
+    /// db.set("key1".to_owned(), "value1".to_owned()).unwrap();
+    /// db.remove("key1".to_owned()).expect("Expect Ok(()) here"); // Removes "key1" from the DataBase
+    ///
+    /// db.remove("key2".to_owned()).expect_err("Expect KeyNotFound Err."); // "key2" doesn't in DataBase.
+    /// ```
     pub fn remove(&mut self, key: String) -> Result<()> {
         if let Some(cmd_pos) = self.index.remove(&key) {
-            //let cmd = Command::Rm { key };
-            //self.logwriter.write(&cmd)?;
             self.redundance_bytes += cmd_pos.len;
             if self.redundance_bytes >= REDUNDANCE_THRESHOLD {
                 self.log_compact()?;
@@ -134,25 +141,28 @@ impl KvStore {
         }
     }
 
-    ///// Returns an iterator of all the keys in the DataBase. If the DataBase is empty, returns an
-    ///// empty iterator. The order of the keys is arbitrary.
-    ///// # Examples
-    ///// ```
-    ///// use kvs::KvStore;
-    /////
-    ///// let mut db = KvStore::new();
-    ///// db.set("key1".to_owned(), "value1".to_owned()).unwrap();
-    ///// db.set("key2".to_owned(), "value2".to_owned()).unwrap();
-    /////
-    ///// for k in db.scan() {
-    /////     println!("key: {}, value: {}", k, *k); // print all the key-value pairs in the DataBase
-    ///// }
-    ///// ```
-    //pub fn scan(&self) -> impl Iterator<Item = &String> {
-    //    self.table.keys()
-    //}
+    /// Returns an iterator of all the keys in the DataBase. If the DataBase is empty, returns an
+    /// empty iterator. The order of the keys is arbitrary.
+    /// # Examples
+    /// ```
+    /// use kvs::KvStore;
+    /// use tempfile::TempDir;
+    ///
+    /// let temp_dir = TempDir::new().expect("unable to create temporary working directory");
+    /// let mut db = KvStore::open(&temp_dir).unwrap();
+    ///
+    /// db.set("key1".to_owned(), "value1".to_owned()).unwrap();
+    /// db.set("key2".to_owned(), "value2".to_owned()).unwrap();
+    ///
+    /// for k in db.scan() {
+    ///     println!("key: {}, value: {}", k, *k); // print all the key-value pairs in the DataBase
+    /// }
+    /// ```
+    pub fn scan(&self) -> impl Iterator<Item = &String> {
+        self.index.keys()
+    }
 
-    /// Open a KvStore DataBase from a file.
+    /// Open a KvStore DataBase from the directory contains logfile and index file.
     pub fn open<P: AsRef<Path>>(path: P) -> Result<KvStore> {
         let log_file = path.as_ref().to_path_buf().join("log");
         let index_file = path.as_ref().to_path_buf().join("index");
@@ -232,10 +242,10 @@ impl KvStore {
 }
 
 impl Drop for KvStore {
+    /// Store index file of DataBase when the KvStore instance go out of scope. 
     fn drop(&mut self) {
         let index_writer = BufWriter::new(File::create(&self.index_path).unwrap());
         serde_json::to_writer(index_writer, &self.index).unwrap();
-
         let tmp_log = format!("{}.tmp", self.log_path.display());
         let tmp_log_path = Path::new(&tmp_log);
         if tmp_log_path.exists() {
