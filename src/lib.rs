@@ -155,7 +155,7 @@ impl KvStore {
     /// db.set("key2".to_owned(), "value2".to_owned()).unwrap();
     ///
     /// for k in db.scan() {
-    ///     println!("key: {}, value: {}", k, *k); // print all the key-value pairs in the DataBase
+    ///     println!("{}", k); // print all keys in the DataBase
     /// }
     /// ```
     pub fn scan(&self) -> impl Iterator<Item = &String> {

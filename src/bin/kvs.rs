@@ -1,5 +1,4 @@
 use std::env::current_dir;
-use std::process::exit;
 use structopt::StructOpt;
 
 use kvs::KvStore;
@@ -68,8 +67,9 @@ fn main() {
             db.remove(key).unwrap_or_else(|e| e.exit(1));
         }
         Opt::Scan => {
-            eprintln!("unimplemented");
-            exit(1);
+            for k in db.scan() {
+                println!("{}", k);
+            }
         }
     }
 }
