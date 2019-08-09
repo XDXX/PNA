@@ -1,10 +1,6 @@
 use std::fmt;
 use std::io;
-use std::process::exit;
-use std::result;
-
-use serde_json;
-
+use std::process::exit; use std::result; use serde_json; 
 /// Custom Result type for kvs.
 pub type Result<T> = result::Result<T, KvsError>;
 
@@ -15,6 +11,8 @@ pub enum KvsError {
     KeyNotFound,
     IOError(io::Error),
     DeserError(serde_json::error::Error),
+    ParseEngineError,
+    CmdNotSupport
 }
 
 impl KvsError {
@@ -32,6 +30,8 @@ impl fmt::Display for KvsError {
             KvsError::KeyNotFound => write!(f, "Key not found"),
             KvsError::IOError(inner) => write!(f, "{}", inner),
             KvsError::DeserError(inner) => write!(f, "{}", inner),
+            KvsError::ParseEngineError => write!(f, "Can not parse engin name."),
+            KvsError::CmdNotSupport => write!(f, "Command not support.")
         }
     }
 }
@@ -45,6 +45,12 @@ impl From<io::Error> for KvsError {
 impl From<serde_json::error::Error> for KvsError {
     fn from(error: serde_json::error::Error) -> Self {
         KvsError::DeserError(error)
+    }
+}
+
+impl From<KvsError> for String {
+    fn from(error: KvsError) -> Self {
+        error.to_string()
     }
 }
 
