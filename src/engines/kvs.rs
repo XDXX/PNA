@@ -6,8 +6,8 @@ use std::io::prelude::*;
 use std::io::{BufReader, BufWriter, SeekFrom};
 use std::path::{Path, PathBuf};
 
-use crate::error::{KvsError, Result};
 use super::KvsEngine;
+use crate::error::{KvsError, Result};
 
 use serde::{Deserialize, Serialize};
 use serde_json::Deserializer;
@@ -133,6 +133,7 @@ impl KvsEngine for KvStore {
     ///
     /// ```
     /// use kvs::KvStore;
+    /// use kvs::KvsEngine;
     /// use tempfile::TempDir;
     /// let temp_dir = TempDir::new().expect("unable to create temporary working directory");
     /// println!("{:?}", temp_dir);
@@ -178,6 +179,7 @@ impl KvsEngine for KvStore {
     ///
     /// ```
     /// use kvs::KvStore;
+    /// use kvs::KvsEngine;
     /// use tempfile::TempDir;
     ///
     /// let temp_dir = TempDir::new().expect("unable to create temporary working directory");
@@ -209,6 +211,7 @@ impl KvsEngine for KvStore {
     /// # Examples
     /// ```
     /// use kvs::KvStore;
+    /// use kvs::KvsEngine;
     /// use tempfile::TempDir;
     ///
     /// let temp_dir = TempDir::new().expect("unable to create temporary working directory");
@@ -220,8 +223,16 @@ impl KvsEngine for KvStore {
     /// db.remove("key2".to_owned()).expect_err("Expect KeyNotFound Err."); // "key2" doesn't in DataBase.
     /// ```
     fn remove(&mut self, key: String) -> Result<()> {
-        if let Some(cmd_pos) = self.index.remove(&key) {
-            self.redundance_bytes += cmd_pos.len;
+        if let Some(old_cmd_pos) = self.index.remove(&key) {
+            let cmd = Command::Rm { key };
+            let cmd_head_pos = self.logwriter.write(&cmd)?;
+
+            let cmd_pos = CommandPos {
+                pos: cmd_head_pos,
+                len: self.logwriter.writer.seek(SeekFrom::End(0))? - cmd_head_pos,
+            };
+
+            self.redundance_bytes += old_cmd_pos.len + cmd_pos.len;
             if self.redundance_bytes >= REDUNDANCE_THRESHOLD {
                 self.log_compact()?;
             }
@@ -236,6 +247,7 @@ impl KvsEngine for KvStore {
     /// # Examples
     /// ```
     /// use kvs::KvStore;
+    /// use kvs::KvsEngine;
     /// use tempfile::TempDir;
     ///
     /// let temp_dir = TempDir::new().expect("unable to create temporary working directory");
@@ -248,12 +260,11 @@ impl KvsEngine for KvStore {
     ///     println!("key: {}, value: {}", k, *k); // print all the key-value pairs in the DataBase
     /// }
     /// ```
-    fn scan<'a>(&'a self) -> Box<dyn Iterator<Item=&String> + 'a> {
+    fn scan<'a>(&'a self) -> Box<dyn Iterator<Item = &String> + 'a> {
         //self.index.keys().collect()
         Box::new(self.index.keys())
     }
 }
-
 
 #[derive(Deserialize, Serialize)]
 enum Command {

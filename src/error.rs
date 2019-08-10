@@ -1,6 +1,8 @@
+use serde_json;
 use std::fmt;
 use std::io;
-use std::process::exit; use std::result; use serde_json; 
+use std::process::exit;
+use std::result;
 /// Custom Result type for kvs.
 pub type Result<T> = result::Result<T, KvsError>;
 
@@ -12,7 +14,7 @@ pub enum KvsError {
     IOError(io::Error),
     DeserError(serde_json::error::Error),
     ParseEngineError,
-    CmdNotSupport
+    CmdNotSupport,
 }
 
 impl KvsError {
@@ -31,7 +33,7 @@ impl fmt::Display for KvsError {
             KvsError::IOError(inner) => write!(f, "{}", inner),
             KvsError::DeserError(inner) => write!(f, "{}", inner),
             KvsError::ParseEngineError => write!(f, "Can not parse engin name."),
-            KvsError::CmdNotSupport => write!(f, "Command not support.")
+            KvsError::CmdNotSupport => write!(f, "Command not support."),
         }
     }
 }

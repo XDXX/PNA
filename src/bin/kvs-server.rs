@@ -1,24 +1,24 @@
-use std::net::SocketAddr;
-use std::str::FromStr;
-use std::net::{TcpListener, TcpStream};
+use std::env::current_dir;
+use std::fs::File;
 use std::io::prelude::*;
 use std::io::BufReader;
-use std::env::current_dir;
-use std::process::exit;
+use std::net::SocketAddr;
+use std::net::{TcpListener, TcpStream};
 use std::path::PathBuf;
+use std::process::exit;
+use std::str::FromStr;
 use std::sync::Mutex;
-use std::fs::File;
 
-use slog::{info, o, error, Drain};
+use slog::{error, info, o, Drain};
 use slog_json;
 use structopt::StructOpt;
 
-use kvs::{KvsEngine, KvsError, KvStore};
+use kvs::{KvStore, KvsEngine, KvsError};
 
 enum BackEngines {
     Kvs,
     Sled,
-    Auto
+    Auto,
 }
 
 impl FromStr for BackEngines {
@@ -70,7 +70,7 @@ fn main() -> kvs::Result<()> {
     let mut engine = match engine_type {
         BackEngines::Kvs => KvStore::open(current_dir()?).exit_if_err(&log, 1),
         BackEngines::Sled => KvStore::open(current_dir()?).exit_if_err(&log, 1),
-        BackEngines::Auto => exit(1)
+        BackEngines::Auto => exit(1),
     };
 
     info!(log, "kvs-server configuration";
@@ -82,12 +82,8 @@ fn main() -> kvs::Result<()> {
     for stream in listener.incoming() {
         let mut stream = stream?;
         let response = match get_response(&stream, &mut engine) {
-            Ok(response) => {
-                response
-            }
-            Err(e) => {
-                format!("Error\r\n{}\r\n", e)
-            }
+            Ok(response) => response,
+            Err(e) => format!("Error\r\n{}\r\n", e),
         };
 
         stream.write_all(response.as_bytes())?;
@@ -105,27 +101,29 @@ fn get_response<T: KvsEngine>(stream: &TcpStream, engine: &mut T) -> kvs::Result
             let value = read_line_from_stream(&mut buf_reader)?;
             engine.set(key, value)?;
             Ok("Success\r\n".to_string())
-        },
+        }
         "GET" => {
             let key = read_line_from_stream(&mut buf_reader)?;
             let value = engine.get(key)?;
             match value {
                 Some(v) => Ok(format!("Success\r\n{}\r\n{}\r\n", v.len(), v)),
-                None => Ok("Success\r\n-1\r\n".to_string())
+                None => Ok("Success\r\n-1\r\n".to_string()),
             }
-        },
+        }
         "RM" => {
             let key = read_line_from_stream(&mut buf_reader)?;
             engine.remove(key)?;
             Ok("Success\r\n".to_string())
-        },
-        "SCAN" => {
-            let keys = engine.scan().map(|x| x.as_str()).collect::<Vec<&str>>().join("\r\n");
-            Ok(format!("Success\r\n{}\r\n", keys))
-        },
-        _ => {
-            Err(KvsError::CmdNotSupport)
         }
+        "SCAN" => {
+            let keys = engine
+                .scan()
+                .map(|x| x.as_str())
+                .collect::<Vec<&str>>()
+                .join("\r\n");
+            Ok(format!("Success\r\n{}\r\n", keys))
+        }
+        _ => Err(KvsError::CmdNotSupport),
     }
 }
 
@@ -148,9 +146,9 @@ impl<T, E: std::error::Error> LogAndExit for Result<T, E> {
             Result::Err(e) => {
                 error!(logger, "An error occurred.";
                        "Error" => e.to_string());
-                exit(exit_code)                
-            },
-            Result::Ok(t) => t
+                exit(exit_code)
+            }
+            Result::Ok(t) => t,
         }
     }
 }
@@ -165,14 +163,16 @@ fn get_engin(dir: PathBuf, engine: BackEngines, log: &slog::Logger) -> BackEngin
             error!(log, "Engines are not compatible.";
                    "engine previously used" => engine_type);
             exit(1);
-        } 
+        }
     } else {
         let engine = match engine {
             BackEngines::Auto => BackEngines::Kvs,
-            _ => engine
+            _ => engine,
         };
-        let mut engine_fs = File::create(persisted_engine).unwrap();
-        engine_fs.write(format!("{:?}", engine).as_bytes()).unwrap();
+        let mut engine_file = File::create(persisted_engine).unwrap();
+        engine_file
+            .write_all(format!("{:?}", engine).as_bytes())
+            .unwrap();
         engine
     }
 }

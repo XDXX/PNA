@@ -14,5 +14,5 @@ pub trait KvsEngine {
     fn remove(&mut self, key: String) -> Result<()>;
 
     /// Returns an iterator of all the keys in the DataBase.
-    fn scan<'a>(&'a self) -> Box<dyn Iterator<Item=&String> + 'a>;
+    fn scan<'a>(&'a self) -> Box<dyn Iterator<Item = &String> + 'a>;
 }
