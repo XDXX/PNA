@@ -257,12 +257,11 @@ impl KvsEngine for KvStore {
     /// db.set("key2".to_owned(), "value2".to_owned()).unwrap();
     ///
     /// for k in db.scan() {
-    ///     println!("key: {}, value: {}", k, *k); // print all the key-value pairs in the DataBase
+    ///     println!("key: {}", k); // print all the keys in the DataBase
     /// }
     /// ```
-    fn scan<'a>(&'a self) -> Box<dyn Iterator<Item = &String> + 'a> {
-        //self.index.keys().collect()
-        Box::new(self.index.keys())
+    fn scan<'a>(&'a self) -> Box<dyn Iterator<Item = String> + 'a> {
+        Box::new(self.index.keys().cloned())
     }
 }
 

@@ -2,6 +2,7 @@ use std::env::current_dir;
 use std::fs::File;
 use std::io::prelude::*;
 use std::io::BufReader;
+use std::io::ErrorKind::WouldBlock;
 use std::net::SocketAddr;
 use std::net::{TcpListener, TcpStream};
 use std::path::PathBuf;
@@ -9,11 +10,13 @@ use std::process::exit;
 use std::str::FromStr;
 use std::sync::Mutex;
 
+use crossbeam_channel::{bounded, select, Receiver};
+use ctrlc;
 use slog::{error, info, o, Drain};
 use slog_json;
 use structopt::StructOpt;
 
-use kvs::{KvStore, KvsEngine, KvsError};
+use kvs::{KvStore, KvsEngine, KvsError, SledKvsEngine};
 
 enum BackEngines {
     Kvs,
@@ -67,9 +70,9 @@ fn main() -> kvs::Result<()> {
     let opt = Kvs::from_args();
 
     let engine_type = get_engin(current_dir()?, opt.engine, &log);
-    let mut engine = match engine_type {
-        BackEngines::Kvs => KvStore::open(current_dir()?).exit_if_err(&log, 1),
-        BackEngines::Sled => KvStore::open(current_dir()?).exit_if_err(&log, 1),
+    let mut engine: Box<dyn KvsEngine> = match engine_type {
+        BackEngines::Kvs => Box::new(KvStore::open(current_dir()?).exit_if_err(&log, 1)),
+        BackEngines::Sled => Box::new(SledKvsEngine::open(current_dir()?).exit_if_err(&log, 1)),
         BackEngines::Auto => exit(1),
     };
 
@@ -78,20 +81,39 @@ fn main() -> kvs::Result<()> {
           "engine used" => format!("{:?}", engine_type)
     );
 
-    let listener = TcpListener::bind(&opt.ip)?;
-    for stream in listener.incoming() {
-        let mut stream = stream?;
-        let response = match get_response(&stream, &mut engine) {
-            Ok(response) => response,
-            Err(e) => format!("Error\r\n{}\r\n", e),
-        };
+    let ctrl_c_events = ctrl_channel().unwrap();
 
-        stream.write_all(response.as_bytes())?;
+    let listener = TcpListener::bind(&opt.ip)?;
+    listener
+        .set_nonblocking(true)
+        .expect("Cannot set non-blocking");
+
+    loop {
+        select! {
+            recv(ctrl_c_events) -> _ => {
+                drop(engine);
+                exit(0);
+            }
+            default => {
+                match listener.accept() {
+                    Ok((mut stream, _)) => {
+                        let response = match get_response(&stream, &mut *engine) {
+                            Ok(response) => response,
+                            Err(e) => format!("Error\r\n{}\r\n", e),
+                        };
+                        stream.write_all(response.as_bytes())?;
+                    }
+                    Err(ref e) if e.kind() == WouldBlock => continue,
+                    Err(e) => {
+                        return Err(e.into())
+                    }
+                }
+            }
+        }
     }
-    Ok(())
 }
 
-fn get_response<T: KvsEngine>(stream: &TcpStream, engine: &mut T) -> kvs::Result<String> {
+fn get_response(stream: &TcpStream, engine: &mut KvsEngine) -> kvs::Result<String> {
     let mut buf_reader = BufReader::new(stream);
     let cmd = read_line_from_stream(&mut buf_reader)?;
 
@@ -116,11 +138,7 @@ fn get_response<T: KvsEngine>(stream: &TcpStream, engine: &mut T) -> kvs::Result
             Ok("Success\r\n".to_string())
         }
         "SCAN" => {
-            let keys = engine
-                .scan()
-                .map(|x| x.as_str())
-                .collect::<Vec<&str>>()
-                .join("\r\n");
+            let keys = engine.scan().collect::<Vec<String>>().join("\r\n");
             Ok(format!("Success\r\n{}\r\n", keys))
         }
         _ => Err(KvsError::CmdNotSupport),
@@ -175,4 +193,13 @@ fn get_engin(dir: PathBuf, engine: BackEngines, log: &slog::Logger) -> BackEngin
             .unwrap();
         engine
     }
+}
+
+fn ctrl_channel() -> Result<Receiver<()>, ctrlc::Error> {
+    let (sender, receiver) = bounded(10);
+    ctrlc::set_handler(move || {
+        let _ = sender.send(());
+    })?;
+
+    Ok(receiver)
 }
