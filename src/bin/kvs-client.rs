@@ -3,6 +3,7 @@ use std::io::BufReader;
 use std::net::SocketAddr;
 use std::net::TcpStream;
 use std::process::exit;
+use std::time::Duration;
 
 use structopt::StructOpt;
 
@@ -122,7 +123,7 @@ fn main() {
 }
 
 fn request_to_server(addr: &SocketAddr, cmd: Command) -> KvsResult<BufReader<TcpStream>> {
-    let mut stream = TcpStream::connect(addr)?;
+    let mut stream = TcpStream::connect_timeout(addr, Duration::from_secs(1))?;
     let request = match cmd {
         Command::Set { key, value } => format!("SET\r\n{}\r\n{}\r\n", key, value),
         Command::Get { key } => format!("GET\r\n{}\r\n", key),
