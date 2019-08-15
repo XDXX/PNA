@@ -81,11 +81,12 @@ impl KvStore {
     fn log_compact(&mut self) -> Result<()> {
         self.logwriter.flush()?;
 
+        let tmp_log = format!("{}.tmp", self.log_path.display());
         let log_handle = OpenOptions::new()
             .write(true)
             .read(true)
             .create_new(true)
-            .open(format!("{}.tmp", self.log_path.display()))?;
+            .open(&tmp_log)?;
 
         let mut new_logwriter = LogWriter::new(log_handle.try_clone()?);
         let new_logreader = LogReader::new(log_handle.try_clone()?);
@@ -103,6 +104,8 @@ impl KvStore {
         self.logreader = new_logreader;
 
         std::fs::remove_file(&self.log_path)?;
+        std::fs::rename(&tmp_log, &self.log_path).unwrap();
+
         Ok(())
     }
 }
@@ -112,11 +115,6 @@ impl Drop for KvStore {
     fn drop(&mut self) {
         let index_writer = BufWriter::new(File::create(&self.index_path).unwrap());
         serde_json::to_writer(index_writer, &self.index).unwrap();
-        let tmp_log = format!("{}.tmp", self.log_path.display());
-        let tmp_log_path = Path::new(&tmp_log);
-        if tmp_log_path.exists() {
-            std::fs::rename(&tmp_log, &self.log_path).unwrap();
-        }
     }
 }
 
