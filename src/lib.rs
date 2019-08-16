@@ -5,3 +5,5 @@ mod error;
 
 pub use engines::{KvStore, KvsEngine, SledKvsEngine};
 pub use error::{KvsError, Result};
+
+pub mod thread_pool;

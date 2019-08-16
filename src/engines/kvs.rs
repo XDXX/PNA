@@ -5,6 +5,8 @@ use std::fs::{File, OpenOptions};
 use std::io::prelude::*;
 use std::io::{BufReader, BufWriter, SeekFrom};
 use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex};
+use std::ops::Deref;
 
 use super::KvsEngine;
 use crate::error::{KvsError, Result};
@@ -18,38 +20,41 @@ const REDUNDANCE_THRESHOLD: u64 = 1 << 20; // threshold that tigger log compacti
 /// [HashMap](https://doc.rust-lang.org/std/collections/hash_map/struct.HashMap.html).
 ///
 /// The key can be up to 256B and the value can be up to 4KB.
+#[derive(Clone)]
 pub struct KvStore {
-    index: HashMap<String, CommandPos>,
-    logreader: LogReader,
-    logwriter: LogWriter,
-    index_path: PathBuf,
-    log_path: PathBuf,
-    redundance_bytes: u64,
+    index: Arc<Mutex<HashMap<String, CommandPos>>>,
+    logreader: Arc<Mutex<LogReader>>,
+    logwriter: Arc<Mutex<LogWriter>>,
+    index_path: Arc<PathBuf>,
+    log_path: Arc<PathBuf>,
+    redundance_bytes: Arc<Mutex<u64>>,
 }
 
 impl KvStore {
     /// Open a KvStore DataBase from the directory contains logfile and index file.
     pub fn open<P: AsRef<Path>>(path: P) -> Result<KvStore> {
-        let log_file = path.as_ref().to_path_buf().join("log");
-        let index_file = path.as_ref().to_path_buf().join("index");
+        let log_file = Arc::new(path.as_ref().to_path_buf().join("log"));
+        let index_file = Arc::new(path.as_ref().to_path_buf().join("index"));
 
         let log_handle = OpenOptions::new()
             .append(true)
             .read(true)
             .create(true)
-            .open(&log_file)?;
+            .open(log_file.deref())?;
 
-        let mut logreader = LogReader::new(log_handle.try_clone()?);
-        let logwriter = LogWriter::new(log_handle.try_clone()?);
-        let mut index: HashMap<String, CommandPos>;
+        let logreader = Arc::new(Mutex::new(LogReader::new(log_handle.try_clone()?)));
+        let logwriter = Arc::new(Mutex::new(LogWriter::new(log_handle.try_clone()?)));
+        let index_arc: Arc<Mutex<HashMap<String, CommandPos>>>;
 
         if index_file.exists() {
-            let index_handle = OpenOptions::new().read(true).open(&index_file)?;
-            index = serde_json::from_reader(index_handle)?
+            let index_handle = OpenOptions::new().read(true).open(index_file.deref())?;
+            index_arc = Arc::new(Mutex::new(serde_json::from_reader(index_handle)?));
         } else {
-            index = HashMap::new();
+            index_arc = Arc::new(Mutex::new(HashMap::new()));
+            let mut index = index_arc.lock().unwrap();
             let mut log_stream =
-                Deserializer::from_reader(&mut logreader.reader).into_iter::<Command>();
+                Deserializer::from_reader(&mut logreader.lock().unwrap().reader)
+                    .into_iter::<Command>();
 
             let mut curr_head_pos: u64 = 0;
             while let Some(cmd) = log_stream.next() {
@@ -69,17 +74,17 @@ impl KvStore {
         }
 
         Ok(KvStore {
-            index,
+            index: index_arc,
             logreader,
             logwriter,
             index_path: index_file,
             log_path: log_file,
-            redundance_bytes: 0,
+            redundance_bytes: Arc::new(Mutex::new(0)),
         })
     }
 
     fn log_compact(&mut self) -> Result<()> {
-        self.logwriter.flush()?;
+        self.logwriter.lock().unwrap().flush()?;
 
         let tmp_log = format!("{}.tmp", self.log_path.display());
         let log_handle = OpenOptions::new()
@@ -88,23 +93,24 @@ impl KvStore {
             .create_new(true)
             .open(&tmp_log)?;
 
-        let mut new_logwriter = LogWriter::new(log_handle.try_clone()?);
-        let new_logreader = LogReader::new(log_handle.try_clone()?);
+        let new_logwriter_arc = Arc::new(Mutex::new(LogWriter::new(log_handle.try_clone()?)));
+        let mut new_logwriter = new_logwriter_arc.lock().unwrap();
+        let new_logreader_arc = Arc::new(Mutex::new(LogReader::new(log_handle.try_clone()?)));
 
         let mut cmd_head_pos: u64 = 0;
-        for (_, cmd_pos) in self.index.iter_mut() {
-            let cmd_bytes = self.logreader.read_raw_in_pos(cmd_pos.pos, cmd_pos.len)?;
+        for (_, cmd_pos) in self.index.lock().unwrap().iter_mut() {
+            let cmd_bytes = self.logreader.lock().unwrap().read_raw_in_pos(cmd_pos.pos, cmd_pos.len)?;
             cmd_pos.pos = cmd_head_pos;
             cmd_head_pos += cmd_pos.len;
 
             new_logwriter.writer.write_all(&cmd_bytes)?;
         }
 
-        self.logwriter = new_logwriter;
-        self.logreader = new_logreader;
+        self.logwriter = new_logwriter_arc;
+        self.logreader = new_logreader_arc;
 
-        std::fs::remove_file(&self.log_path)?;
-        std::fs::rename(&tmp_log, &self.log_path).unwrap();
+        std::fs::remove_file(self.log_path.deref())?;
+        std::fs::rename(&tmp_log, self.log_path.deref()).unwrap();
 
         Ok(())
     }
@@ -113,8 +119,8 @@ impl KvStore {
 impl Drop for KvStore {
     /// Store index file of DataBase when the KvStore instance go out of scope.
     fn drop(&mut self) {
-        let index_writer = BufWriter::new(File::create(&self.index_path).unwrap());
-        serde_json::to_writer(index_writer, &self.index).unwrap();
+        let index_writer = BufWriter::new(File::create(self.index_path.deref()).unwrap());
+        serde_json::to_writer(index_writer, self.index.lock().unwrap().deref()).unwrap();
     }
 }
 
@@ -143,27 +149,30 @@ impl KvsEngine for KvStore {
     ///
     /// db.set(big_key, "value".to_owned()).expect_err("expect err there"); // set returns an error
     /// ```
-    fn set(&mut self, key: String, value: String) -> Result<()> {
+    fn set(&self, key: String, value: String) -> Result<()> {
         check_length(&key, "key", 256)?;
         check_length(&value, "value", 1 << 12)?;
 
         let cmd = Command::Set { key, value };
-        let cmd_head_pos = self.logwriter.write(&cmd)?;
+        let mut logwriter = self.logwriter.lock().unwrap();
+        let cmd_head_pos = logwriter.write(&cmd)?;
 
         let cmd_pos = CommandPos {
             pos: cmd_head_pos,
-            len: self.logwriter.writer.seek(SeekFrom::End(0))? - cmd_head_pos,
+            len: logwriter.writer.seek(SeekFrom::End(0))? - cmd_head_pos,
         };
 
+        
+        let mut redundance_bytes = self.redundance_bytes.lock().unwrap();
         if let Command::Set { key, .. } = cmd {
-            if let Some(old_pos) = self.index.insert(key, cmd_pos) {
-                self.redundance_bytes += old_pos.len;
+            if let Some(old_pos) = self.index.lock().unwrap().insert(key, cmd_pos) {
+                *redundance_bytes += old_pos.len;
             }
         }
 
-        if self.redundance_bytes >= REDUNDANCE_THRESHOLD {
+        if *redundance_bytes >= REDUNDANCE_THRESHOLD {
             self.log_compact()?;
-            self.redundance_bytes = 0;
+            *redundance_bytes = 0;
         }
         Ok(())
     }
@@ -187,11 +196,11 @@ impl KvsEngine for KvStore {
     /// assert_eq!(db.get("key1".to_owned()).unwrap(), Some("value1".to_owned()));
     /// assert_eq!(db.get("key2".to_owned()).unwrap(), None);
     /// ```
-    fn get(&mut self, key: String) -> Result<Option<String>> {
-        self.logwriter.flush()?;
+    fn get(&self, key: String) -> Result<Option<String>> {
+        self.logwriter.lock().unwrap().flush()?;
 
-        if let Some(cmd_pos) = self.index.get(&key) {
-            let cmd = self.logreader.read_in_pos(cmd_pos.pos, cmd_pos.len)?;
+        if let Some(cmd_pos) = self.index.lock().unwrap().get(&key) {
+            let cmd = self.logreader.lock().unwrap().read_in_pos(cmd_pos.pos, cmd_pos.len)?;
             match cmd {
                 Command::Set { value, .. } => Ok(Some(value)),
                 _ => Err(KvsError::KeyNotFound),
@@ -220,18 +229,19 @@ impl KvsEngine for KvStore {
     ///
     /// db.remove("key2".to_owned()).expect_err("Expect KeyNotFound Err."); // "key2" doesn't in DataBase.
     /// ```
-    fn remove(&mut self, key: String) -> Result<()> {
-        if let Some(old_cmd_pos) = self.index.remove(&key) {
+    fn remove(&self, key: String) -> Result<()> {
+        if let Some(old_cmd_pos) = self.index.lock().unwrap().remove(&key) {
             let cmd = Command::Rm { key };
-            let cmd_head_pos = self.logwriter.write(&cmd)?;
+            let cmd_head_pos = self.logwriter.lock().unwrap().write(&cmd)?;
 
             let cmd_pos = CommandPos {
                 pos: cmd_head_pos,
-                len: self.logwriter.writer.seek(SeekFrom::End(0))? - cmd_head_pos,
+                len: self.logwriter.lock().unwrap().writer.seek(SeekFrom::End(0))? - cmd_head_pos,
             };
 
-            self.redundance_bytes += old_cmd_pos.len + cmd_pos.len;
-            if self.redundance_bytes >= REDUNDANCE_THRESHOLD {
+            let mut redundance_bytes = self.redundance_bytes.lock().unwrap();
+            *redundance_bytes += old_cmd_pos.len + cmd_pos.len;
+            if *redundance_bytes >= REDUNDANCE_THRESHOLD {
                 self.log_compact()?;
             }
             Ok(())
@@ -259,7 +269,7 @@ impl KvsEngine for KvStore {
     /// }
     /// ```
     fn scan<'a>(&'a self) -> Box<dyn Iterator<Item = String> + 'a> {
-        Box::new(self.index.keys().cloned())
+        Box::new(self.index.lock().unwrap().keys().cloned())
     }
 }
 

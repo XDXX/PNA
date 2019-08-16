@@ -1,43 +1,50 @@
 use super::KvsEngine;
 use crate::error::{KvsError, Result};
 use std::path::Path;
+use std::sync::{Arc, Mutex};
+use std::ops::DerefMut;
 
 use sled::Db;
 
 /// Warpper of the [sled](https://docs.rs/sled/0.24.1/sled/) backed engine.
+#[derive(Clone)]
 pub struct SledKvsEngine {
-    database: Db,
+    database: Arc<Mutex<Db>>,
 }
 
 impl SledKvsEngine {
     /// Open a SledKvsEngine from the directory contains the existing.
     pub fn open<P: AsRef<Path>>(path: P) -> Result<Self> {
-        let db = Db::start_default(path)?;
+        let db = Arc::new(Mutex::new(Db::start_default(path)?));
         Ok(SledKvsEngine { database: db })
     }
 }
 
 impl KvsEngine for SledKvsEngine {
-    fn set(&mut self, key: String, value: String) -> Result<()> {
-        self.database.set(key, value.as_bytes())?;
-        self.database.flush()?;
+    fn set(&self, key: String, value: String) -> Result<()> {
+        let database = self.database.lock().unwrap().deref_mut();
+        database.set(key, value.as_bytes())?;
+        database.flush()?;
         Ok(())
     }
 
-    fn get(&mut self, key: String) -> Result<Option<String>> {
-        let v = self.database.get(key)?;
+    fn get(&self, key: String) -> Result<Option<String>> {
+        let v = self.database.lock().unwrap().get(key)?;
         Ok(v.and_then(|s| Some(String::from_utf8(s.to_vec()).unwrap())))
     }
 
-    fn remove(&mut self, key: String) -> Result<()> {
-        self.database.del(key)?.ok_or(KvsError::KeyNotFound)?;
-        self.database.flush()?;
+    fn remove(&self, key: String) -> Result<()> {
+        let database = self.database.lock().unwrap().deref_mut();
+        database.del(key)?.ok_or(KvsError::KeyNotFound)?;
+        database.flush()?;
         Ok(())
     }
 
     fn scan<'a>(&'a self) -> Box<dyn Iterator<Item = String> + 'a> {
         let iter = self
             .database
+            .lock()
+            .unwrap()
             .iter()
             .keys()
             .map(|s| String::from_utf8(s.unwrap()).unwrap());
