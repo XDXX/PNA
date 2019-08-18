@@ -16,7 +16,7 @@ use slog::{error, info, o, Drain};
 use slog_json;
 use structopt::StructOpt;
 
-use kvs::{KvStore, KvsEngine, KvsError, SledKvsEngine};
+use kvs::{KvStore, KvsEngine, KvsError, NaiveThreadPool, SledKvsEngine, ThreadPool};
 
 enum BackEngines {
     Kvs,
@@ -55,7 +55,7 @@ struct Kvs {
     #[structopt(long = "addr", default_value = "127.0.0.1:4000")]
     ip: SocketAddr,
 
-    /// The built-in engine used as beckend, either "kvs" or "sled". Automatically select
+    /// The built-in engine used as backend, either "kvs" or "sled". Automatically select
     /// from "kvs" or "sled" by default.
     #[structopt(long = "engine", default_value = "auto")]
     engine: BackEngines,
@@ -64,44 +64,59 @@ struct Kvs {
 fn main() -> kvs::Result<()> {
     let drain = Mutex::new(slog_json::Json::default(std::io::stderr())).map(slog::Fuse);
     let log = slog::Logger::root(drain, o!());
-
     info!(log, "kvs-server start up"; "version" => env!("CARGO_PKG_VERSION"));
 
     let opt = Kvs::from_args();
+    let ctrl_c_events = ctrl_channel().unwrap();
 
-    let engine_type = get_engin(current_dir()?, opt.engine, &log);
-    let mut engine: Box<dyn KvsEngine> = match engine_type {
-        BackEngines::Kvs => Box::new(KvStore::open(current_dir()?).exit_if_err(&log, 1)),
-        BackEngines::Sled => Box::new(SledKvsEngine::open(current_dir()?).exit_if_err(&log, 1)),
-        BackEngines::Auto => exit(1),
-    };
-
+    let engine_type = get_engine(current_dir()?, opt.engine, &log);
     info!(log, "kvs-server configuration";
           "socket address" => opt.ip,
           "engine used" => format!("{:?}", engine_type)
     );
 
-    let ctrl_c_events = ctrl_channel().unwrap();
+    match engine_type {
+        BackEngines::Kvs => {
+            let engine = KvStore::open(current_dir()?).exit_if_err(&log, 1);
+            run_server(&opt.ip, ctrl_c_events, engine)
+        }
+        BackEngines::Sled => {
+            let engine = SledKvsEngine::open(current_dir()?).exit_if_err(&log, 1);
+            run_server(&opt.ip, ctrl_c_events, engine)
+        }
+        BackEngines::Auto => exit(1),
+    }
+}
 
-    let listener = TcpListener::bind(&opt.ip)?;
+fn run_server<E: KvsEngine>(
+    ip: &SocketAddr,
+    ctrl_c_events: Receiver<()>,
+    engine: E,
+) -> kvs::Result<()> {
+    let listener = TcpListener::bind(ip)?;
     listener
         .set_nonblocking(true)
         .expect("Cannot set non-blocking");
 
+    let pool = NaiveThreadPool::new(1000)?;
+
     loop {
         select! {
             recv(ctrl_c_events) -> _ => {
-                drop(engine);
+                engine.save_index_log()?;
                 exit(0);
             }
             default => {
                 match listener.accept() {
                     Ok((mut stream, _)) => {
-                        let response = match get_response(&stream, &mut *engine) {
-                            Ok(response) => response,
-                            Err(e) => format!("Error\r\n{}\r\n", e),
-                        };
-                        stream.write_all(response.as_bytes())?;
+                        let engine = engine.clone();
+                        pool.spawn(move || {
+                            let response = match get_response(&stream, engine) {
+                                Ok(response) => response,
+                                Err(e) => format!("Error\r\n{}\r\n", e),
+                            };
+                            stream.write_all(response.as_bytes()).unwrap();
+                        })
                     }
                     Err(ref e) if e.kind() == WouldBlock => continue,
                     Err(e) => {
@@ -113,7 +128,7 @@ fn main() -> kvs::Result<()> {
     }
 }
 
-fn get_response(stream: &TcpStream, engine: &mut KvsEngine) -> kvs::Result<String> {
+fn get_response<E: KvsEngine>(stream: &TcpStream, engine: E) -> kvs::Result<String> {
     let mut buf_reader = BufReader::new(stream);
     let cmd = read_line_from_stream(&mut buf_reader)?;
 
@@ -138,7 +153,7 @@ fn get_response(stream: &TcpStream, engine: &mut KvsEngine) -> kvs::Result<Strin
             Ok("Success\r\n".to_string())
         }
         "SCAN" => {
-            let keys = engine.scan().collect::<Vec<String>>().join("\r\n");
+            let keys = engine.scan().join("\r\n");
             Ok(format!("Success\r\n{}\r\n", keys))
         }
         _ => Err(KvsError::CmdNotSupport),
@@ -171,7 +186,7 @@ impl<T, E: std::error::Error> LogAndExit for Result<T, E> {
     }
 }
 
-fn get_engin(dir: PathBuf, engine: BackEngines, log: &slog::Logger) -> BackEngines {
+fn get_engine(dir: PathBuf, engine: BackEngines, log: &slog::Logger) -> BackEngines {
     let persisted_engine = dir.join("db.type");
     if persisted_engine.exists() {
         let engine_type = std::fs::read_to_string(&persisted_engine).unwrap();

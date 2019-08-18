@@ -35,7 +35,7 @@ impl fmt::Display for KvsError {
             KvsError::KeyNotFound => write!(f, "Key not found"),
             KvsError::IOError(inner) => write!(f, "{}", inner),
             KvsError::DeserError(inner) => write!(f, "{}", inner),
-            KvsError::ParseEngineError => write!(f, "Can not parse engin name."),
+            KvsError::ParseEngineError => write!(f, "Can not parse engine name."),
             KvsError::CmdNotSupport => write!(f, "Command not support."),
             KvsError::SledError(inner) => write!(f, "{}", inner),
         }

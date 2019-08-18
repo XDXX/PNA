@@ -2,8 +2,8 @@
 #[deny(missing_docs)]
 mod engines;
 mod error;
+mod thread_pool;
 
 pub use engines::{KvStore, KvsEngine, SledKvsEngine};
 pub use error::{KvsError, Result};
-
-pub mod thread_pool;
+pub use thread_pool::{NaiveThreadPool, ThreadPool};

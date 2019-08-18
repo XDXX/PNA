@@ -2,11 +2,10 @@ use super::KvsEngine;
 use crate::error::{KvsError, Result};
 use std::path::Path;
 use std::sync::{Arc, Mutex};
-use std::ops::DerefMut;
 
 use sled::Db;
 
-/// Warpper of the [sled](https://docs.rs/sled/0.24.1/sled/) backed engine.
+/// Wrapper of the [sled](https://docs.rs/sled/0.24.1/sled/) backed engine.
 #[derive(Clone)]
 pub struct SledKvsEngine {
     database: Arc<Mutex<Db>>,
@@ -22,7 +21,7 @@ impl SledKvsEngine {
 
 impl KvsEngine for SledKvsEngine {
     fn set(&self, key: String, value: String) -> Result<()> {
-        let database = self.database.lock().unwrap().deref_mut();
+        let database = self.database.lock().unwrap();
         database.set(key, value.as_bytes())?;
         database.flush()?;
         Ok(())
@@ -34,20 +33,18 @@ impl KvsEngine for SledKvsEngine {
     }
 
     fn remove(&self, key: String) -> Result<()> {
-        let database = self.database.lock().unwrap().deref_mut();
+        let database = self.database.lock().unwrap();
         database.del(key)?.ok_or(KvsError::KeyNotFound)?;
         database.flush()?;
         Ok(())
     }
 
-    fn scan<'a>(&'a self) -> Box<dyn Iterator<Item = String> + 'a> {
-        let iter = self
-            .database
-            .lock()
-            .unwrap()
+    fn scan(&self) -> Vec<String> {
+        let database = self.database.lock().unwrap();
+        database
             .iter()
             .keys()
-            .map(|s| String::from_utf8(s.unwrap()).unwrap());
-        Box::new(iter)
+            .map(|s| String::from_utf8(s.unwrap()).unwrap())
+            .collect()
     }
 }

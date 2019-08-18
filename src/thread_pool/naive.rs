@@ -3,7 +3,7 @@ use std::thread;
 use super::ThreadPool;
 use crate::Result;
 
-struct NaiveThreadPool;
+pub struct NaiveThreadPool;
 
 impl ThreadPool for NaiveThreadPool {
     fn new(_: u32) -> Result<NaiveThreadPool> {
