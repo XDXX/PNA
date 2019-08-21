@@ -16,6 +16,7 @@ slog-json = "2.3.0"
 sled = "0.24"
 ctrlc = "3.1"
 crossbeam-channel = "0.3.9"
+num_cpus = "1.1"
 
 [dev-dependencies]
 assert_cmd = "0.11.0"

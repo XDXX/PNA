@@ -6,7 +6,7 @@ use crate::Result;
 pub struct NaiveThreadPool;
 
 impl ThreadPool for NaiveThreadPool {
-    fn new(_: u32) -> Result<NaiveThreadPool> {
+    fn new(_: usize) -> Result<NaiveThreadPool> {
         Ok(NaiveThreadPool)
     }
 

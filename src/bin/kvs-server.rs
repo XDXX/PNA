@@ -15,8 +15,10 @@ use ctrlc;
 use slog::{error, info, o, Drain};
 use slog_json;
 use structopt::StructOpt;
+use num_cpus;
 
-use kvs::{KvStore, KvsEngine, KvsError, NaiveThreadPool, SledKvsEngine, ThreadPool};
+use kvs::{KvStore, KvsEngine, KvsError, SledKvsEngine};
+use kvs::{ThreadPool, NaiveThreadPool, SharedQueueThreadPool};
 
 enum BackEngines {
     Kvs,
@@ -67,38 +69,37 @@ fn main() -> kvs::Result<()> {
     info!(log, "kvs-server start up"; "version" => env!("CARGO_PKG_VERSION"));
 
     let opt = Kvs::from_args();
-    let ctrl_c_events = ctrl_channel().unwrap();
-
     let engine_type = get_engine(current_dir()?, opt.engine, &log);
     info!(log, "kvs-server configuration";
           "socket address" => opt.ip,
           "engine used" => format!("{:?}", engine_type)
     );
+    let ctrl_c_events = ctrl_channel().unwrap();
 
+    let thread_pool = SharedQueueThreadPool::new(num_cpus::get())?;
     match engine_type {
         BackEngines::Kvs => {
             let engine = KvStore::open(current_dir()?).exit_if_err(&log, 1);
-            run_server(&opt.ip, ctrl_c_events, engine)
+            run_server(&opt.ip, ctrl_c_events, engine, &thread_pool)
         }
         BackEngines::Sled => {
             let engine = SledKvsEngine::open(current_dir()?).exit_if_err(&log, 1);
-            run_server(&opt.ip, ctrl_c_events, engine)
+            run_server(&opt.ip, ctrl_c_events, engine, &thread_pool)
         }
         BackEngines::Auto => exit(1),
     }
 }
 
-fn run_server<E: KvsEngine>(
+fn run_server<E: KvsEngine, P: ThreadPool>(
     ip: &SocketAddr,
     ctrl_c_events: Receiver<()>,
     engine: E,
+    thread_pool: &P,
 ) -> kvs::Result<()> {
     let listener = TcpListener::bind(ip)?;
     listener
         .set_nonblocking(true)
         .expect("Cannot set non-blocking");
-
-    let pool = NaiveThreadPool::new(1000)?;
 
     loop {
         select! {
@@ -110,7 +111,7 @@ fn run_server<E: KvsEngine>(
                 match listener.accept() {
                     Ok((mut stream, _)) => {
                         let engine = engine.clone();
-                        pool.spawn(move || {
+                        thread_pool.spawn(move || {
                             let response = match get_response(&stream, engine) {
                                 Ok(response) => response,
                                 Err(e) => format!("Error\r\n{}\r\n", e),

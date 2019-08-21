@@ -1,12 +1,14 @@
-pub use self::naive::NaiveThreadPool;
-use crate::Result;
-
 mod naive;
+mod shared_queue;
+
+pub use self::naive::NaiveThreadPool;
+pub use self::shared_queue::SharedQueueThreadPool;
+use crate::Result;
 
 /// An interface for representing the thread pool.
 pub trait ThreadPool {
     /// Creates a new thread pool with the specified number of threads.
-    fn new(threads: u32) -> Result<Self>
+    fn new(threads: usize) -> Result<Self>
     where
         Self: Sized;
 
