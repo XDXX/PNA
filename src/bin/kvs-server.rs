@@ -12,13 +12,13 @@ use std::sync::Mutex;
 
 use crossbeam_channel::{bounded, select, Receiver};
 use ctrlc;
+use num_cpus;
 use slog::{error, info, o, Drain};
 use slog_json;
 use structopt::StructOpt;
-use num_cpus;
 
 use kvs::{KvStore, KvsEngine, KvsError, SledKvsEngine};
-use kvs::{ThreadPool, NaiveThreadPool, SharedQueueThreadPool};
+use kvs::{NaiveThreadPool, SharedQueueThreadPool, ThreadPool};
 
 enum BackEngines {
     Kvs,
